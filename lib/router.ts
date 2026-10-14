@@ -72,12 +72,13 @@ async function defaultHostId(sdk: Sdk, projectId: string): Promise<string | null
   return (sources.find((source) => source.isDefault) ?? sources[0])?.hostId ?? null;
 }
 
-async function listProjectThreads(
-  sdk: Sdk,
+export async function listProjectThreads(
+  sdk: Pick<Sdk, "threads">,
   projectId: string,
+  archivedStates: readonly boolean[] = [false, true],
 ): Promise<ThreadSummary[]> {
   const all: ThreadSummary[] = [];
-  for (const archived of [false, true]) {
+  for (const archived of archivedStates) {
     for (let offset = 0; offset < MAX_THREADS_SCANNED; offset += PAGE) {
       const page = await sdk.threads.list({
         projectId,

@@ -30,6 +30,18 @@ The thread id links to that thread in BB, so you can jump back into it.
 
 Archived threads are unarchived when a new request arrives for them.
 
+## Resolving threads when a PR merges
+
+When a PR is merged, BB archives the threads its `/bb` mentions were sent to.
+Threads you never tagged from GitHub are never touched. Each thread is archived
+only once, so a thread you reopen afterwards stays open. Threads that are busy
+(a turn, background agent, command, or workflow running) are archived when they
+finish. Pinned threads are never archived, nor are threads started after the
+merge.
+
+Only merges after the plugin starts watching a repository count. Turn it off
+with **Resolve threads when their PR is merged**.
+
 ## Several repositories
 
 Every BB project whose git remote is a private github.com repository is
@@ -40,8 +52,8 @@ project is ignored. `bb pr-mentions status` lists both.
 ## How it reaches GitHub
 
 It polls; no webhook, no public port. Each repository costs two requests per
-interval (issue comments, review comments) plus one for your event feed
-(review summaries). These are conditional requests, and GitHub does not count
+interval (issue comments, review comments), plus one for closed PRs once it has
+had a mention, plus one for your event feed (review summaries). These are conditional requests, and GitHub does not count
 an unchanged (304) answer against the rate limit. The default interval is 30
 seconds.
 
@@ -81,6 +93,7 @@ the plugin limits what can reach it:
 | Poll interval | 30 s | 15–3600 |
 | Start a new thread when no thread is on the PR | on | |
 | New threads run in | worktree | or the project's default environment |
+| Resolve threads when their PR is merged | on | Only threads a `/bb` mention went to, each once; busy and pinned ones are skipped |
 | Ask the agent to reply on GitHub when done | on | |
 | React with 👀 | on | 😕 when nothing could take it |
 | BB address for thread links | auto | BB's app URL, else the Tailscale Serve address in front of BB, else the thread id without a link |
@@ -89,7 +102,7 @@ the plugin limits what can reach it:
 ## Commands
 
 ```
-bb pr-mentions status      # watched and skipped repos, last poll, recent mentions and where they went
+bb pr-mentions status      # watched and skipped repos, last poll, recent mentions, threads archived on merge
 bb pr-mentions poll        # poll now
 bb pr-mentions reply [comment-url] --body-stdin   # what agents use to answer, signed and linked
 bb pr-mentions retry [comment-url]                # handle failed mentions (or one) again

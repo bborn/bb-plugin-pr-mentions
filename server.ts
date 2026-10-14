@@ -4,7 +4,8 @@
 //
 // A background service polls every private GitHub repository that a BB project
 // points at (see lib/poller.ts), keeps only unedited comments by you or by
-// allowedUsers, and routes each one (see lib/router.ts).
+// allowedUsers, and routes each one (see lib/router.ts). It also archives
+// threads whose PR was merged (see lib/merged.ts).
 import {
   PluginCliError,
   cliCommand,
@@ -14,6 +15,7 @@ import {
 import { z } from "zod";
 import { tailscaleServeOrigin, threadUrl } from "./lib/bb-url.js";
 import { GitHubClient } from "./lib/github.js";
+import { MergeResolver } from "./lib/merged.js";
 import { signedReply } from "./lib/message.js";
 import { Poller, type PollSummary } from "./lib/poller.js";
 import { parsePullRef } from "./lib/repo.js";
@@ -65,6 +67,13 @@ export default async function plugin(bb: BbPluginApi) {
       options: ["worktree", "project-default"],
       default: "worktree",
     },
+    resolveMergedThreads: {
+      type: "boolean",
+      label: "Resolve threads when their PR is merged",
+      description:
+        "Archives the threads a PR's GitHub mentions were sent to once the PR is merged. Other threads are never touched. Busy and pinned threads are skipped, and a thread you reopen is never archived again.",
+      default: true,
+    },
     replyOnGitHub: {
       type: "boolean",
       label: "Ask the agent to reply on GitHub when done",
@@ -100,6 +109,7 @@ export default async function plugin(bb: BbPluginApi) {
   });
   const router = new Router(bb.sdk, github, store);
   const visibility = new RepoVisibility(github);
+  const merges = new MergeResolver(bb.sdk, github, store);
 
   let detectedBbUrl: { value: string | null; at: number } | null = null;
   async function bbUrl(): Promise<string | null> {
@@ -174,13 +184,22 @@ export default async function plugin(bb: BbPluginApi) {
     inFlight ??= (async () => {
       try {
         const current = await settings.get();
-        const all = [...(await projectsBySlug(bb.sdk)).keys()].sort();
+        const projects = await projectsBySlug(bb.sdk);
+        const all = [...projects.keys()].sort();
         const { watched } = await visibility.partition(all, signal);
-        return await poller.pollOnce(
+        const summary = await poller.pollOnce(
           watched,
           { trigger: current.trigger, allowedUsers: allowedUsers(current.allowedUsers) },
           signal,
         );
+        if (current.resolveMergedThreads) {
+          const mentioned = new Set(store.mentionedSlugs());
+          await merges.poll(watched.filter((slug) => mentioned.has(slug)), signal);
+          for (const { threadId, pr } of (await merges.resolve(projects)).archived) {
+            bb.log.info(`${pr} merged: archived ${threadId}`);
+          }
+        }
+        return summary;
       } finally {
         inFlight = null;
       }
@@ -278,6 +297,8 @@ export default async function plugin(bb: BbPluginApi) {
               repos: Object.fromEntries(watched),
               notWatched: Object.fromEntries(skipped),
               recent: recent.map(({ payload: _payload, ...row }) => row),
+              resolveMergedThreads: current.resolveMergedThreads,
+              resolved: store.recentlyResolved(options.limit),
             };
             if (options.json) return { exitCode: 0, stdout: JSON.stringify(value) };
             const lines = [
@@ -296,6 +317,14 @@ export default async function plugin(bb: BbPluginApi) {
               "",
               recent.length === 0 ? "No mentions yet." : "Recent mentions:",
               ...recent.map(formatRow),
+              "",
+              current.resolveMergedThreads
+                ? "Threads archived because their PR merged:"
+                : "Resolving threads on merge is off.",
+              ...value.resolved.map(
+                (row) =>
+                  `${new Date(row.resolved_at).toISOString().slice(0, 16).replace("T", " ")}  ${row.pr} → ${row.thread_id}`,
+              ),
             ];
             return { exitCode: 0, stdout: lines.join("\n") };
           },

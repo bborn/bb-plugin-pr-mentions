@@ -1,6 +1,8 @@
 // Plugin-owned state in the plugin's SQLite database: the mention log (also
-// the dedupe set), PR → thread links, and per-feed poll cursors.
+// the dedupe set), PR → thread links, per-feed poll cursors, merged PRs, and
+// the threads archived because their PR merged.
 import type Database from "better-sqlite3";
+import type { MergedPr } from "./merged.js";
 import type { Mention, MentionStatus } from "./types.js";
 
 export const MIGRATIONS = [
@@ -29,6 +31,19 @@ export const MIGRATIONS = [
     key TEXT PRIMARY KEY,
     since TEXT NOT NULL,
     etag TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS merges (
+    pr TEXT PRIMARY KEY,
+    slug TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    head_ref TEXT NOT NULL,
+    merged_at INTEGER NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS resolved (
+    thread_id TEXT PRIMARY KEY,
+    pr TEXT NOT NULL,
+    resolved_at INTEGER NOT NULL
   )`,
 ];
 
@@ -192,5 +207,72 @@ export class Store {
          ON CONFLICT(key) DO UPDATE SET since = excluded.since, etag = excluded.etag`,
       )
       .run(key, cursor.since, cursor.etag);
+  }
+
+  /** Repositories with at least one mention that reached a thread. */
+  mentionedSlugs(): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT DISTINCT slug FROM mentions WHERE thread_id IS NOT NULL AND status IN ('delivered', 'spawned')`,
+        )
+        .all() as { slug: string }[]
+    ).map((row) => row.slug);
+  }
+
+  /** Threads that mentions on this PR or issue were sent to. */
+  mentionThreads(slug: string, number: number): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT DISTINCT thread_id FROM mentions WHERE slug = ? AND number = ? AND thread_id IS NOT NULL AND status IN ('delivered', 'spawned')`,
+        )
+        .all(slug, number) as { thread_id: string }[]
+    ).map((row) => row.thread_id);
+  }
+
+  addMerge(merge: MergedPr): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO merges (pr, slug, number, head_ref, merged_at) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(prKey(merge.slug, merge.number), merge.slug, merge.number, merge.headRef, merge.mergedAt);
+  }
+
+  /** Merges whose threads are not dealt with yet, merged after `after`. */
+  pendingMerges(after: number): MergedPr[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT slug, number, head_ref, merged_at FROM merges WHERE done = 0 AND merged_at > ? ORDER BY merged_at`,
+        )
+        .all(after) as { slug: string; number: number; head_ref: string; merged_at: number }[]
+    ).map((row) => ({
+      slug: row.slug,
+      number: row.number,
+      headRef: row.head_ref,
+      mergedAt: row.merged_at,
+    }));
+  }
+
+  finishMerge(slug: string, number: number): void {
+    this.db.prepare(`UPDATE merges SET done = 1 WHERE pr = ?`).run(prKey(slug, number));
+  }
+
+  /** True when this thread was archived for a merge before; it is never archived again. */
+  wasResolved(threadId: string): boolean {
+    return this.db.prepare(`SELECT 1 FROM resolved WHERE thread_id = ?`).get(threadId) !== undefined;
+  }
+
+  markResolved(threadId: string, pr: string): void {
+    this.db
+      .prepare(`INSERT OR IGNORE INTO resolved (thread_id, pr, resolved_at) VALUES (?, ?, ?)`)
+      .run(threadId, pr, Date.now());
+  }
+
+  recentlyResolved(limit: number): { thread_id: string; pr: string; resolved_at: number }[] {
+    return this.db
+      .prepare(`SELECT * FROM resolved ORDER BY resolved_at DESC LIMIT ?`)
+      .all(limit) as { thread_id: string; pr: string; resolved_at: number }[];
   }
 }

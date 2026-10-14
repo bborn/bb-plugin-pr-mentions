@@ -38,7 +38,7 @@ the thread first.
 ## Commands
 
 ```
-bb pr-mentions status [--limit N] [--json]   # watched repos, last poll, recent mentions
+bb pr-mentions status [--limit N] [--json]   # watched repos, last poll, recent mentions, merge archives
 bb pr-mentions poll                          # poll GitHub now
 bb pr-mentions reply [comment-url] --body-stdin [--dry-run]   # reply on GitHub, signed with a link to this thread
 bb pr-mentions retry [comment-url]           # handle failed mentions (or one mention) again
@@ -55,3 +55,7 @@ Only private repositories with a BB project are watched. Only unedited comments
 by the user (or the logins in the "Also accept comments from" setting) count,
 and by default only on PRs and issues they opened, never on PRs from forks.
 Refused requests show as `refused` in `bb pr-mentions status`.
+
+When a PR merges, the plugin archives the threads that PR's mentions were sent
+to (no other threads), once each: a thread the user reopens stays open. Busy and
+pinned threads are skipped. `bb pr-mentions status` lists what it archived.
