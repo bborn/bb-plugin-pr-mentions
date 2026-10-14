@@ -1,0 +1,40 @@
+{
+  "name": "bb-plugin-pr-mentions",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "bb": ">=0.44",
+    "bbPluginSdk": ">=0.5.30"
+  },
+  "bb": {
+    "name": "PR Mentions",
+    "description": "Write /bb in a GitHub PR comment and the request goes to the BB thread working on that PR, or to a new thread.",
+    "branding": {
+      "icon": "MessageSquareCode"
+    },
+    "server": "./server.ts",
+    "skills": [
+      "skills"
+    ]
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.5.30",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.3.0",
+    "better-sqlite3": "^12.0.0",
+    "hono": "^4.13.13",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
+  },
+  "description": "Mention BB in a GitHub PR comment and the request goes to the BB thread working on that PR.",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "build": "bb plugin build"
+  }
+}
